@@ -170,19 +170,20 @@ def do_train(args):
 def do_evaluate(args):
     # if we want to do inference only (i.e. no label is provided) we only load images and their paths
 
-    val_loader = data_loader.CSVDataset(args.val_info, args.delimiter, args.raw_size, args.processed_size, args.batch_size, args.num_threads, args.path_prefix, False,
+    val_loader = data_loader.CSVDataset(args.val_info, args.delimiter, args.raw_size, args.processed_size, args.batch_size, args.num_workers, args.path_prefix, False,
             shuffle = False, inference_only= args.inference_only).load()
 
-    checkpoint = torch.load(args.log_dir)
-    dnn_model = model(checkpoint['arch'],checkpoint['num_classes'])
+    checkpoint = torch.load(utils.smart_load(args.log_dir))
+    dnn_model = model(checkpoint['arch'], checkpoint['num_classes'])
     
     if args.num_gpus == 1:
         dnn_model = dnn_model.cuda()
+        # Load pretrained parameters from disk
+        dnn_model.load_state_dict(checkpoint['model'])
     else:
-        dnn_model = torch.nn.DataParallel(dnn_model, device_ids = range(0, args.num_gpus))
-
-    # Load pretrained parameters from disk
-    dnn_model.load_state_dict(checkpoint['model'])
+        dnn_model = torch.nn.DataParallel(dnn_model, device_ids = range(0, args.num_gpus)).cuda()
+        # Load pretrained parameters from disk
+        dnn_model.module.load_state_dict(checkpoint['model'])
 
     criterion = nn.CrossEntropyLoss().cuda()
     # evaluation 
@@ -197,7 +198,6 @@ def do_evaluate(args):
         for step,(input, target, info) in enumerate(val_loader):
             input = input.cuda(non_blocking = True)
             target = target.cuda(non_blocking = True)
-
             # Load a batch of data
             output= softmax(dnn_model(input))
             loss = criterion(output, target)
@@ -336,6 +336,8 @@ def main():  # pylint: disable=unused-argument
         print(args)
         # do testing
         do_evaluate(args)
+    else:
+        raise ValueError("Invalid command provided %s"%(args.command))
 
 if __name__ == '__main__':
     main()
